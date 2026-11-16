@@ -44,11 +44,14 @@ __version__ = "1.0.0"
 # 打包成窗口程序后（PyInstaller --windowed），子进程 ffmpeg 默认会弹黑框，这里统一隐藏
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
-# Windows 下把输出重定向到管道/文件时，控制台编码可能是 GBK，
-# 遇到 ✓ 这类字符会直接 UnicodeEncodeError。这里统一降级为替换字符。
+# 输出编码：终端里沿用系统编码（只放宽 errors）；重定向到管道/文件时强制 UTF-8，
+# 避免 Windows 的 cp936/cp1252 把中文写成问号。
 for _stream in (sys.stdout, sys.stderr):
     try:
-        _stream.reconfigure(errors="replace")  # type: ignore[attr-defined]
+        if _stream.isatty():
+            _stream.reconfigure(errors="replace")  # type: ignore[attr-defined]
+        else:
+            _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
     except Exception:
         pass
 

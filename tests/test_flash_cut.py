@@ -7,6 +7,7 @@
 """
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -24,6 +25,13 @@ SHIM = str(Path(__file__).with_name("fake_ffmpeg.py"))
 FAKE_FFMPEG = f"{sys.executable} {SHIM}"  # flash_cut 内部会按空格拆分
 DURATION = 10.0
 SEGMENT = 2.0  # 假视频每 2 秒整体换一次画面
+
+
+def _engine_env() -> dict:
+    """子进程统一按 UTF-8 输出，避免 Windows 默认编码把中文替换成问号。"""
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    return env
 
 
 def gray(value: int, h: int = 72, w: int = 128) -> np.ndarray:
@@ -149,7 +157,9 @@ class EndToEndTests(unittest.TestCase):
 
     def run_engine(self, target, *args):
         cmd = [sys.executable, str(ROOT / "flash_cut.py"), str(target), "--ffmpeg", FAKE_FFMPEG, *args]
-        return subprocess.run(cmd, capture_output=True, text=True)
+        return subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", env=_engine_env()
+        )
 
     def run_cli(self, *args):
         return self.run_engine(self.video, *args)
