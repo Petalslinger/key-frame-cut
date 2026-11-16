@@ -4,10 +4,11 @@
 
 - Python 3.9+
 - numpy
-- ffmpeg 仅在处理真实视频时需要；测试使用 `tests/fake_ffmpeg.py` 模拟解码
+- Pillow：仅测试需要，假 ffmpeg 用它写图片
+- ffmpeg：仅处理真实视频时需要
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 python -m unittest discover -s tests -v
 ```
 

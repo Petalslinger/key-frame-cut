@@ -2,9 +2,16 @@ name: tests
 
 on:
   push:
-    branches: [master, main]
+    branches: [main, master]
   pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -13,20 +20,33 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
-        python: ["3.9", "3.12"]
+        # Ubuntu 26.04 没有 CPython 3.9 的构建，最低版本只在 Windows 上验证
+        include:
+          - os: windows-latest
+            python: "3.9"
+          - os: windows-latest
+            python: "3.12"
+          - os: ubuntu-latest
+            python: "3.12"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
 
       - name: 安装依赖
         run: |
           python -m pip install --upgrade pip
-          python -m pip install numpy
+          python -m pip install -r requirements-dev.txt
+
+      - name: 环境信息
+        run: |
+          python -c "import sys, numpy, PIL; print(sys.version); print('numpy', numpy.__version__, '| pillow', PIL.__version__)"
+
+      - name: CLI 冒烟
+        run: python flash_cut.py --check
 
       - name: 跑测试（假 ffmpeg，不依赖真实解码器）
         run: python -m unittest discover -s tests -v

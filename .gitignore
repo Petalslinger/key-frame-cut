@@ -27,6 +27,7 @@ dist/
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+.tmp/
 
 # ---- 本地素材 ----
 # 测试用视频，避免误提交大文件
