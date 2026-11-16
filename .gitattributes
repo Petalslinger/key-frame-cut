@@ -1,5 +1,5 @@
-# 统一换行：仓库里存 LF，Windows 上 .bat 保持 CRLF 才能在 cmd 里正常执行
-* text=auto
+# 统一换行：仓库与工作区都用 LF，Windows 的 .bat 例外（cmd 需要 CRLF）
+* text=auto eol=lf
 
 *.py   text eol=lf
 *.md   text eol=lf
