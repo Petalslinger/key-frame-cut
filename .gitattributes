@@ -1,0 +1,18 @@
+# 统一换行：仓库里存 LF，Windows 上 .bat 保持 CRLF 才能在 cmd 里正常执行
+* text=auto
+
+*.py   text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.ico  binary
+*.exe  binary

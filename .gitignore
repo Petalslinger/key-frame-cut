@@ -1,0 +1,43 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# ---- 运行产物 ----
+# 导出目录（单文件模式 / 文件夹模式）
+*_frames/
+keyframes/
+out/
+# 界面记住的参数，每台机器不一样
+flash_gui_config.json
+# 调阈值时导出的分数表
+scores*.csv
+
+# ---- 打包 ----
+build/
+dist/
+*.spec
+
+# ---- 测试 / 缓存 ----
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# ---- 本地素材 ----
+# 测试用视频，避免误提交大文件
+*.mp4
+*.mkv
+*.mov
+*.avi
+
+# ---- 编辑器 / 系统 ----
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

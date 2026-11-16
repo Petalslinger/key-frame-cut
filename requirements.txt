@@ -1,0 +1,6 @@
+numpy>=1.21
+
+# 可选依赖
+# pillow>=9.0        # --sheet 总览拼图
+# opencv-python>=4.5 # 没有 ffmpeg 时的备选解码后端
+# imageio-ffmpeg     # 不想装系统 ffmpeg 时，提供一份 ffmpeg 可执行文件
