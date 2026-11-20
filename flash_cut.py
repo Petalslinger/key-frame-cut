@@ -39,7 +39,7 @@ from typing import Iterator, Optional, Sequence
 
 import numpy as np
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 # 打包成窗口程序后（PyInstaller --windowed），子进程 ffmpeg 默认会弹黑框，这里统一隐藏
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -696,6 +696,8 @@ def write_manifest(out_dir: Path, args: argparse.Namespace, info: MediaInfo, cut
             "prefix": args.prefix,
             "dedupe": args.dedupe,
             "dupe_threshold": args.dupe_threshold,
+            "mode": "interval" if args.every is not None else "threshold",
+            "every": args.every,
         },
         "frames": [
             {
@@ -746,6 +748,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-gap", type=float, default=0.0, help="两个关键帧的最小间隔秒数，默认 0")
     p.add_argument("--dedupe", choices=["all", "last"], default="all", help="去重方式：all=与所有已保留帧比较（默认，相同画面只留一张）；last=只与上一帧比较")
     p.add_argument("--dupe-threshold", type=float, default=None, help="去重阈值，默认取阈值的一半；与任一已保留帧的差异小于它就不再导出")
+    p.add_argument("--every", type=float, default=None, metavar="SECONDS", help="固定间隔模式：每 N 秒截一帧，不比较、不去重（阈值/度量参数失效）")
     p.add_argument("--scan-height", type=int, default=72, help="扫描用灰度图高度，默认 72（越大越灵敏也越慢）")
     p.add_argument("--start", type=float, default=0.0, help="只处理该时间之后的视频（秒）")
     p.add_argument("--end", type=float, default=None, help="只处理到该时间（秒）")
@@ -786,6 +789,75 @@ def _score_path(base: Optional[str], video: Optional[Path] = None) -> Optional[P
     return path.with_name(f"{path.stem}_{video.stem}{path.suffix or '.csv'}")
 
 
+def interval_times(
+    duration: float,
+    every: float,
+    start: float = 0.0,
+    end: Optional[float] = None,
+    max_frames: int = 0,
+) -> list[float]:
+    """固定间隔模式下的采样时间点（秒）。"""
+    if every <= 0:
+        return []
+    stop = min(end, duration) if end is not None else duration
+    times: list[float] = []
+    t = max(0.0, start)
+    while t < stop - 1e-9:
+        if max_frames and len(times) >= max_frames:
+            break
+        times.append(round(t, 3))
+        t += every
+    return times
+
+
+def export_cuts(
+    backend,
+    args: argparse.Namespace,
+    src: Path,
+    info: MediaInfo,
+    out_dir: Path,
+    cuts: list[Cut],
+    scores_path: Optional[Path] = None,
+    duplicates: int = 0,
+) -> int:
+    """把 cuts 逐个导出为图片，并写清单，返回帧数。"""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ext = ".jpg" if args.image_format == "jpg" else ".png"
+    out_w = args.out_width
+    if out_w and info.width and out_w > info.width:
+        log(f"[提示] --out-width {out_w} 超过源宽度 {info.width}，按原尺寸导出（放大只会更糊）")
+        out_w = info.width
+    if not args.quiet:
+        log(f"导出   : {ext.lstrip('.')}，宽 {out_w or info.width}px，质量 {args.quality}")
+    made: list[Path] = []
+    total = len(cuts)
+    for i, c in enumerate(cuts, 1):
+        path = out_dir / frame_name(i, ext, args.prefix)
+        backend.extract(src, c.time, path, args.quality, out_w)
+        c.file = path.name
+        made.append(path)
+        if not args.quiet:
+            print(f"\r  导出 {i}/{total}  {timecode(c.time)}", end="", file=sys.stderr, flush=True)
+    if not args.quiet and cuts:
+        print(file=sys.stderr)
+
+    if args.sheet and made:
+        try:
+            make_contact_sheet(made, out_dir / "contact_sheet.jpg", [timecode(c.time) for c in cuts])
+        except Exception as exc:  # Pillow 缺失不应让整件事失败
+            log(f"[警告] 生成拼图失败：{exc}")
+
+    manifest = write_manifest(out_dir, args, info, cuts)
+    log("")
+    log(f"完成：{len(cuts)} 个关键帧，输出目录 {out_dir}")
+    if duplicates:
+        log(f"      另有 {duplicates} 帧与已保留画面重复，已跳过")
+    log(f"清单：{manifest.name} / frames.csv")
+    if scores_path is not None:
+        log(f"分数：{scores_path}（用 --dry-run 结合它挑阈值）")
+    return len(cuts)
+
+
 def process_video(
     backend,
     args: argparse.Namespace,
@@ -794,6 +866,8 @@ def process_video(
     scores_path: Optional[Path],
 ) -> int:
     """处理单个视频，返回导出的关键帧数量。"""
+    if args.every is not None:
+        return process_interval(backend, args, src, out_dir, scores_path)
     info = backend.probe(src)
     W, H = choose_scan_size(info.width, info.height, args.scan_height)
     out_dir = out_dir or src.with_name(f"{src.stem}_frames")
@@ -858,40 +932,38 @@ def process_video(
             print(f"  （另有 {selector.duplicates} 帧与已保留画面重复，已跳过）")
         return len(cuts)
 
-    out_dir.mkdir(parents=True, exist_ok=True)
-    ext = ".jpg" if args.image_format == "jpg" else ".png"
-    out_w = args.out_width
-    if out_w and info.width and out_w > info.width:
-        log(f"[提示] --out-width {out_w} 超过源宽度 {info.width}，按原尺寸导出（放大只会更糊）")
-        out_w = info.width
+    return export_cuts(backend, args, src, info, out_dir, cuts, scores_path, selector.duplicates)
+
+
+def process_interval(
+    backend,
+    args: argparse.Namespace,
+    src: Path,
+    out_dir: Optional[Path],
+    scores_path: Optional[Path] = None,
+) -> int:
+    """固定间隔模式：每 every 秒取一帧，不做比较、不去重。"""
+    info = backend.probe(src)
+    out_dir = out_dir or src.with_name(f"{src.stem}_frames")
+    every = float(args.every)
+    if info.duration <= 0 and args.end is None:
+        raise RuntimeError(f"无法获取视频时长，无法按固定间隔截取：{src}（可用 --end 指定结束时间）")
+
+    times = interval_times(info.duration, every, args.start, args.end, args.max_frames)
     if not args.quiet:
-        log(f"导出   : {ext.lstrip('.')}，宽 {out_w or info.width}px，质量 {args.quality}")
-    made: list[Path] = []
-    for i, c in enumerate(cuts, 1):
-        path = out_dir / frame_name(i, ext, args.prefix)
-        backend.extract(src, c.time, path, args.quality, out_w)
-        c.file = path.name
-        made.append(path)
-        if not args.quiet:
-            print(f"\r  导出 {i}/{len(cuts)}  {timecode(c.time)}", end="", file=sys.stderr, flush=True)
-    if not args.quiet and cuts:
-        print(file=sys.stderr)
+        log(f"输入   : {src}")
+        log(f"视频   : {info.width}x{info.height} @ {info.fps:.3f}fps, 时长 {timecode(info.duration)}")
+        log(f"模式   : 固定间隔，每 {every:g}s 一帧，不比较、不去重（共 {len(times)} 帧）")
 
-    if args.sheet and made:
-        try:
-            make_contact_sheet(made, out_dir / "contact_sheet.jpg", [timecode(c.time) for c in cuts])
-        except Exception as exc:  # Pillow 缺失不应让整件事失败
-            log(f"[警告] 生成拼图失败：{exc}")
+    cuts = [Cut(i + 1, t, None) for i, t in enumerate(times)]
 
-    manifest = write_manifest(out_dir, args, info, cuts)
-    log("")
-    log(f"完成：{len(cuts)} 个关键帧，输出目录 {out_dir}")
-    if selector.duplicates:
-        log(f"      另有 {selector.duplicates} 帧与已保留画面重复，已跳过")
-    log(f"清单：{manifest.name} / frames.csv")
-    if scores_path is not None:
-        log(f"分数：{scores_path}（用 --dry-run 结合它挑阈值）")
-    return len(cuts)
+    if args.dry_run:
+        print(f"\n共 {len(cuts)} 个切点（固定间隔 {every:g}s）：")
+        for c in cuts:
+            print(f"  {c.index:4d}  {timecode(c.time)}  score=固定")
+        return len(cuts)
+
+    return export_cuts(backend, args, src, info, out_dir, cuts, scores_path)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -914,6 +986,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         die("--threshold 不能为负数")
     if args.dupe_threshold is not None and args.dupe_threshold < 0:
         die("--dupe-threshold 不能为负数")
+    if args.every is not None:
+        if args.every <= 0:
+            die("--every 必须大于 0")
+        if args.threshold is not None or args.dupe_threshold is not None or args.min_gap > 0 or args.dedupe != "all" or args.dump_scores:
+            log("[提示] --every 模式下阈值、去重、分数导出均不生效")
 
     backend = make_backend(args)
 

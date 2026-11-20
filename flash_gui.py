@@ -56,6 +56,7 @@ DEDUPE_MAP = {"全部已保留帧": "all", "仅上一帧": "last"}
 # 引擎输出（stderr 与 stdout 已合并，\r 被文本模式转成 \n）
 RE_PROGRESS = re.compile(r"扫描\s+(\S+)\s*/\s*(\S+)\s+([\d.]+)\s*%")
 RE_PROGRESS_NA = re.compile(r"扫描\s+(\S+)\s*/\s*(\S+)\s+\?\?\?")
+RE_EXPORT = re.compile(r"导出\s+(\d+)/(\d+)")
 RE_CUT_DRY = re.compile(r"^\s*(\d+)\s+(\d{2}:\d{2}:\d{2}\.\d{3})\s+score=(\S+)(?:\s+\(\+[\d.]+s\))?\s*$")
 RE_CUT_RUN = re.compile(r"^\s*\*\s+(\S+)\s+score=(\S+)\s*$")
 RE_DONE = re.compile(r"完成：(\d+) 个关键帧，输出目录\s+(.+)")
@@ -135,6 +136,8 @@ class App:
         self.v_end = v()
         self.v_dedupe = v(value="全部已保留帧")
         self.v_dupethr = v()
+        self.v_interval = tk.BooleanVar(value=False)
+        self.v_interval_sec = v(value="5")
         self.v_ffmpeg = v()
         self.v_sheet = tk.BooleanVar(value=False)
         self.v_same = tk.BooleanVar(value=False)
@@ -215,11 +218,17 @@ class App:
 
         r4 = ttk.Frame(adv)
         r4.pack(fill="x", pady=(6, 0))
-        ttk.Label(r4, text="ffmpeg 路径").pack(side="left")
-        ttk.Entry(r4, textvariable=self.v_ffmpeg).pack(side="left", fill="x", expand=True, padx=6)
-        ttk.Button(r4, text="浏览…", width=8, command=self.on_pick_ffmpeg).pack(side="left")
-        ttk.Checkbutton(r4, text="生成总览拼图", variable=self.v_sheet).pack(side="left", padx=(10, 0))
-        ttk.Label(r4, text="留空 = 自动查找", foreground="#777").pack(side="left", padx=(4, 0))
+        ttk.Checkbutton(r4, text="固定间隔模式", variable=self.v_interval).pack(side="left")
+        self._field(r4, "每", lambda p: ttk.Entry(p, textvariable=self.v_interval_sec, width=6))
+        ttk.Label(r4, text="秒截一帧（不比较、不去重，阈值/度量参数失效）", foreground="#777").pack(side="left")
+
+        r5 = ttk.Frame(adv)
+        r5.pack(fill="x", pady=(6, 0))
+        ttk.Label(r5, text="ffmpeg 路径").pack(side="left")
+        ttk.Entry(r5, textvariable=self.v_ffmpeg).pack(side="left", fill="x", expand=True, padx=6)
+        ttk.Button(r5, text="浏览…", width=8, command=self.on_pick_ffmpeg).pack(side="left")
+        ttk.Checkbutton(r5, text="生成总览拼图", variable=self.v_sheet).pack(side="left", padx=(10, 0))
+        ttk.Label(r5, text="留空 = 自动查找", foreground="#777").pack(side="left", padx=(4, 0))
 
     def _build_buttons(self, outer: ttk.Frame) -> None:
         bar = ttk.Frame(outer)
@@ -377,16 +386,22 @@ class App:
         args += ["--format", self.v_fmt.get() or "jpg"]
         self._opt(args, "--quality", self.v_quality)
         self._opt(args, "--out-width", self.v_width)
-        self._opt(args, "--sample-fps", self.v_fps)
-        args += ["--metric", self.v_metric.get() or "mad"]
-        self._opt(args, "--threshold", self.v_thr)
-        self._opt(args, "--min-gap", self.v_gap)
         self._opt(args, "--scan-height", self.v_scanh)
         self._opt(args, "--max-frames", self.v_max)
         self._opt(args, "--start", self.v_start)
         self._opt(args, "--end", self.v_end)
-        args += ["--dedupe", DEDUPE_MAP.get(self.v_dedupe.get().strip(), "all")]
-        self._opt(args, "--dupe-threshold", self.v_dupethr)
+
+        every = self.v_interval_sec.get().strip() if self.v_interval.get() else ""
+        if every:
+            # 固定间隔模式下不传阈值/度量/去重参数，避免误导
+            args += ["--every", every]
+        else:
+            self._opt(args, "--sample-fps", self.v_fps)
+            args += ["--metric", self.v_metric.get() or "mad"]
+            self._opt(args, "--threshold", self.v_thr)
+            self._opt(args, "--min-gap", self.v_gap)
+            args += ["--dedupe", DEDUPE_MAP.get(self.v_dedupe.get().strip(), "all")]
+            self._opt(args, "--dupe-threshold", self.v_dupethr)
         if self.v_ffmpeg.get().strip():
             args += ["--ffmpeg", self.v_ffmpeg.get().strip()]
         if self.v_sheet.get():
@@ -500,6 +515,16 @@ class App:
             self.pb.configure(mode="indeterminate")
             self.pb.start(12)
             self.status.configure(text=f"扫描 {m.group(1)}（时长未知）")
+            return
+
+        m = RE_EXPORT.search(line)
+        if m:
+            done, total = int(m.group(1)), int(m.group(2))
+            if total > 0:
+                self.pb.stop()
+                self.pb.configure(mode="determinate")
+                self.pb["value"] = done * 100.0 / total
+                self.status.configure(text=f"导出 {done}/{total}")
             return
 
         if self._dry:
@@ -708,6 +733,8 @@ class App:
             "end": self.v_end,
             "dedupe": self.v_dedupe,
             "dupethr": self.v_dupethr,
+            "interval": self.v_interval,
+            "interval_sec": self.v_interval_sec,
             "ffmpeg": self.v_ffmpeg,
             "sheet": self.v_sheet,
             "same": self.v_same,

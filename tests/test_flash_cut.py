@@ -137,6 +137,22 @@ class DedupeTests(unittest.TestCase):
         self.assertFalse(sel.feed(2.0, a)[0])
 
 
+class IntervalTests(unittest.TestCase):
+    def test_times_basic(self):
+        self.assertEqual(fc.interval_times(10, 3), [0.0, 3.0, 6.0, 9.0])
+
+    def test_times_start_and_end(self):
+        self.assertEqual(fc.interval_times(10, 3, start=1), [1.0, 4.0, 7.0])
+        self.assertEqual(fc.interval_times(10, 3, end=5), [0.0, 3.0])
+        self.assertEqual(fc.interval_times(7, 3, end=100), [0.0, 3.0, 6.0])
+
+    def test_times_max_frames(self):
+        self.assertEqual(fc.interval_times(100, 1, max_frames=4), [0.0, 1.0, 2.0, 3.0])
+
+    def test_times_invalid_every(self):
+        self.assertEqual(fc.interval_times(10, 0), [])
+
+
 class ProbeTests(unittest.TestCase):
     def test_parse_ffmpeg_stderr(self):
         info = fc.probe_ffmpeg(fc._split_cmd(FAKE_FFMPEG), Path("whatever.mp4"))
@@ -198,6 +214,22 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(len(list(out.glob("frame_*.jpg"))), 3)
         if not (out / "contact_sheet.jpg").exists():
             self.skipTest("Pillow 未安装，跳过拼图检查")
+
+    def test_interval_mode(self):
+        out = self.dir / "interval"
+        r = self.run_engine(self.video, "-o", str(out), "--every", "2", "-q")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        frames = sorted(out.glob("frame_*.jpg"))
+        self.assertEqual(len(frames), 5)
+        meta = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(meta["params"]["mode"], "interval")
+        self.assertEqual([f["time"] for f in meta["frames"]], [0.0, 2.0, 4.0, 6.0, 8.0])
+        self.assertTrue(all(f["score"] is None for f in meta["frames"]))
+
+    def test_interval_dry_run(self):
+        r = self.run_engine(self.video, "--every", "3", "--dry-run", "-q")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("00:00:06.000", r.stdout)
 
     def test_folder_input(self):
         folder = self.dir / "videos"

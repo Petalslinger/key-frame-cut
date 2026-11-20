@@ -4,8 +4,11 @@
 
 默认启用跨帧去重，候选帧同时与全部已保留帧比较，同一画面不会重复导出。
 
+另提供固定间隔模式（`--every N`）：每 N 秒取一帧，不比较、不去重。
+
 ## 特性
 
+- **两种取帧方式**：按画面变化（阈值 + 去重）或按固定间隔（`--every N`，不比较）
 - **两遍扫描**：扫描阶段解码缩略灰度图，导出阶段读取原分辨率，兼顾速度与画质
 - **三种度量**：`mad` 平均绝对差、`dhash` 感知哈希、`hist` 灰度直方图
 - **跨帧去重**：A→B→A 只保留一张，去重阈值独立可调
@@ -69,13 +72,22 @@ python flash_cut.py D:\videos --recursive     # 含子目录
 - 每个视频独立子目录，各自包含图片、`manifest.json`、`frames.csv`
 - 单个视频失败只记录，不影响后续，结束时汇总 `批量完成：x/y`
 
+### 固定间隔
+
+```bash
+python flash_cut.py input.mp4 --every 10            # 每 10 秒取一帧
+python flash_cut.py input.mp4 --every 2 --max-frames 50
+```
+
+不比较画面、不去重，纯按时间采样；`--threshold`、`--metric`、`--dedupe` 在该模式下不生效。
+
 ### 图形界面
 
 ```bash
 python flash_gui.py
 ```
 
-Windows 下可双击 `run_gui.bat`。界面提供文件/文件夹选择、参数配置、实时进度、切点列表与缩略图，参数保存在同目录 `flash_gui_config.json`。
+Windows 下可双击 `run_gui.bat`。界面提供文件/文件夹选择、参数配置、固定间隔开关、实时进度、切点列表与缩略图，参数保存在同目录 `flash_gui_config.json`。
 
 界面以子进程方式调用 `flash_cut.py`，行为与命令行一致。
 
@@ -90,6 +102,7 @@ Windows 下可双击 `run_gui.bat`。界面提供文件/文件夹选择、参数
 | `--threshold` | `0.04` / `8` / `0.25` | 差异阈值 |
 | `--dedupe` | `all` | `all` 与全部已保留帧比较；`last` 仅与上一帧 |
 | `--dupe-threshold` | 阈值 × 0.5 | 去重阈值，低于此值视为同一画面 |
+| `--every` | 关 | 固定间隔模式：每 N 秒取一帧，不做比较与去重 |
 | `--min-gap` | `0` | 两个关键帧的最小间隔（秒） |
 | `--scan-height` | `72` | 扫描灰度图高度 |
 | `--start` / `--end` | 全片 | 处理区间（秒） |
@@ -165,7 +178,7 @@ for t, frame in 采样帧(10fps, 128x72 灰度):
 python -m unittest discover -s tests -v
 ```
 
-测试使用 `tests/fake_ffmpeg.py` 模拟解码，不依赖真实 ffmpeg 或视频文件。覆盖阈值判定、跨帧去重、`min-gap`、`max-frames`、度量距离、探测解析、端到端导出、批量处理与界面模块导入。
+测试使用 `tests/fake_ffmpeg.py` 模拟解码，不依赖真实 ffmpeg 或视频文件。覆盖阈值判定、跨帧去重、固定间隔采样、`min-gap`、`max-frames`、度量距离、探测解析、端到端导出、批量处理与界面模块导入。
 
 ## 打包（可选）
 
